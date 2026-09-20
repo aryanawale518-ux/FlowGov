@@ -1,0 +1,6 @@
+{
+  "name": "FlowGov - Government Process Intelligence",
+  "description": "AI-powered government process intelligence platform to find bottlenecks, explain delays, detect workflow loops, and optimize public administration workflows.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
