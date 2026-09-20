@@ -78,10 +78,23 @@ export const CreateFileModal: React.FC<CreateFileModalProps> = ({
           uploadedDocTypes: uploadedDocs.map(d => d.documentType)
         })
       });
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
         setCompletenessResult(data);
+        return;
       }
+      // Client-side fallback check
+      const selectedTemplate = workflows.find(w => w.id === workflowTemplateId) || workflows[0];
+      const required = selectedTemplate?.requiredDocuments || [];
+      const uploadedTypes = new Set(uploadedDocs.map(d => d.documentType));
+      const missing = required.filter(t => !uploadedTypes.has(t));
+      setCompletenessResult({
+        isComplete: missing.length === 0,
+        missingDocuments: missing,
+        advisoryMessage: missing.length === 0
+          ? 'All statutory required documents verified. Dossier is procedurally eligible for executive approval.'
+          : `Deficiency detected: ${missing.length} statutory document(s) missing before approval signoff.`
+      });
     } catch (err) {
       console.error('Completeness check error:', err);
     } finally {
@@ -92,6 +105,7 @@ export const CreateFileModal: React.FC<CreateFileModalProps> = ({
   const handleSubmitFile = async () => {
     setSubmitting(true);
     try {
+      const selectedTemplate = workflows.find(w => w.id === workflowTemplateId) || workflows[0];
       const res = await fetch('/api/files', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -104,18 +118,68 @@ export const CreateFileModal: React.FC<CreateFileModalProps> = ({
           documents: uploadedDocs
         })
       });
-      if (res.ok) {
+      if (res.ok && res.headers.get('content-type')?.includes('application/json')) {
         const data = await res.json();
-        // Submit the file so it enters stage 1
-        const submitRes = await fetch(`/api/files/${data.file.id}/submit`, { method: 'POST' });
-        if (submitRes.ok) {
-          const submitData = await submitRes.json();
-          onFileCreated(submitData.file);
-        } else {
-          onFileCreated(data.file);
+        if (data?.file) {
+          const submitRes = await fetch(`/api/files/${data.file.id}/submit`, { method: 'POST' });
+          if (submitRes.ok && submitRes.headers.get('content-type')?.includes('application/json')) {
+            const submitData = await submitRes.json();
+            onFileCreated(submitData.file || data.file);
+          } else {
+            onFileCreated(data.file);
+          }
+          onClose();
+          return;
         }
-        onClose();
       }
+
+      // Client-side fallback for static Vercel deployment
+      const randomNum = Math.floor(1000 + Math.random() * 9000);
+      const newFile: GovernmentFile = {
+        id: `file-fg-${randomNum}`,
+        fileNumber: `FG-${randomNum}`,
+        title,
+        description,
+        departmentId,
+        departmentName: departments.find(d => d.id === departmentId)?.name || 'Administrative Department',
+        workflowTemplateId,
+        workflowTemplateName: selectedTemplate?.name || 'Standard Procurement Workflow',
+        status: 'SUBMITTED',
+        priority,
+        slaStatus: 'WITHIN_LIMIT',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        createdBy: 'user-clerk-1',
+        createdByName: 'Amit Patel',
+        currentStageId: selectedTemplate?.stages[0]?.id || 'stg-1',
+        currentStageName: selectedTemplate?.stages[0]?.name || 'Application Intake',
+        loopsCount: 0,
+        totalDurationHours: 1,
+        expectedTotalDurationHours: selectedTemplate?.stages.reduce((a, b) => a + b.expectedDurationHours, 0) || 72,
+        documents: uploadedDocs.map((d, idx) => ({
+          id: `doc-${idx + 1}`,
+          fileId: `file-fg-${randomNum}`,
+          name: d.name,
+          documentType: d.documentType,
+          status: 'VERIFIED',
+          uploadedAt: new Date().toISOString(),
+          fileSize: '1.5 MB'
+        })),
+        stageInstances: (selectedTemplate?.stages || []).map((stg, idx) => ({
+          id: `stg-inst-${idx + 1}`,
+          fileId: `file-fg-${randomNum}`,
+          stageId: stg.id,
+          stageName: stg.name,
+          sequence: stg.sequence,
+          assignedRole: stg.responsibleRole,
+          status: idx === 0 ? 'IN_PROGRESS' : 'PENDING',
+          startedAt: idx === 0 ? new Date().toISOString() : undefined,
+          expectedDurationHours: stg.expectedDurationHours,
+          slaStatus: 'WITHIN_LIMIT'
+        }))
+      };
+      onFileCreated(newFile);
+      onClose();
     } catch (err) {
       console.error('File creation error:', err);
     } finally {
